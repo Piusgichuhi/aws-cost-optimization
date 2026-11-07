@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  AlertEmail: {Type: String}
+  DryRun: {Type: String, Default: "true"}
+
+Resources:
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: resource_id, AttributeType: S}]
+      KeySchema: [{AttributeName: resource_id, KeyType: HASH}]
+
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription: [{Protocol: email, Endpoint: !Ref AlertEmail}]
+
+  OptimizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.lambda_handler
+      Runtime: python3.12
+      Timeout: 300
+      Environment:
+        Variables:
+          DRY_RUN: !Ref DryRun
+          TABLE_NAME: !Ref StateTable
+          TOPIC_ARN: !Ref ReportTopic
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref StateTable}
+        - SNSPublishMessagePolicy: {TopicName: !GetAtt ReportTopic.TopicName}
+        - Statement:
+            - Effect: Allow
+              Action: [ec2:DescribeVolumes, ec2:DescribeAddresses,
+                       ec2:DescribeInstances, cloudwatch:GetMetricStatistics,
+                       ec2:DeleteVolume, ec2:ReleaseAddress, ec2:StopInstances]
+              Resource: "*"
+      Events:
+        Daily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 6 * * ? *)
